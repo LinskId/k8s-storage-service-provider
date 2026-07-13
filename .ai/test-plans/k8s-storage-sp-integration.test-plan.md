@@ -16,7 +16,7 @@ NATS server and StorageClasses.
 | Phase | Scope | Sections |
 |-------|--------|----------|
 | Health + registration (current) | §1–§2 | Server lifecycle, DCM registration |
-| Volume CRUD (follow-up) | §3–§6, §10 | PVC create/read/update/delete |
+| Volume CRUD (follow-up) | §3–§6, §10 | PVC create/read/delete |
 | Monitoring (follow-up) | §7–§8 | NATS CloudEvents, informer |
 
 Until volume handlers and monitoring land, §3–§10 expect **500** on volume routes
@@ -33,7 +33,6 @@ or are not runnable.
 - Real PVC operations against Kubernetes
 - Status reporting to real NATS
 - Informer watches real PVC changes
-- Volume expansion with real StorageClass constraints
 - Multiple backend scenarios
 
 ---
@@ -102,7 +101,6 @@ or are not runnable.
   - `POST /api/v1alpha1/volumes` does not return 404/405
   - `GET /api/v1alpha1/volumes` does not return 404/405
   - `GET /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
-  - `PATCH /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
   - `DELETE /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
 
 ### TC-I003: SP shuts down gracefully on SIGTERM
@@ -151,7 +149,7 @@ or are not runnable.
     - `endpoint`: `{SP_ENDPOINT}/api/v1alpha1/volumes`
     - `service_type`: `"storage"`
     - `schema_version`: `"v1alpha1"`
-    - `operations`: `["CREATE", "READ", "UPDATE", "DELETE"]`
+    - `operations`: `["CREATE", "READ", "DELETE"]`
 
 ### TC-I011: Health endpoint responds after registration
 
@@ -178,9 +176,11 @@ or are not runnable.
 - **When:** POST `/api/v1alpha1/volumes`:
   ```json
   {
-    "capacity": "10Gi",
-    "metadata": {"name": "test-vol-minimal"},
-    "service_type": "storage"
+    "spec": {
+      "capacity": "10Gi",
+      "metadata": {"name": "test-vol-minimal"},
+      "service_type": "storage"
+    }
   }
   ```
 - **Then:**
@@ -188,7 +188,7 @@ or are not runnable.
   - PVC exists in configured namespace (`dcm-test`)
   - PVC has correct labels:
     - `dcm.project/managed-by: dcm`
-    - `dcm.project/dcm-instance-id: <uuid>`
+    - `dcm.project/dcm-instance-id: <aep-122-id>`
     - `dcm.project/dcm-service-type: storage`
   - PVC `spec.resources.requests.storage = "10Gi"`
   - PVC uses cluster default StorageClass
@@ -269,13 +269,13 @@ or are not runnable.
 
 - **Priority:** High
 - **Type:** Integration
-- **Given:** PVC exists with `dcm-instance-id = "550e8400-e29b-41d4-a716-446655440000"`
-- **When:** GET `/api/v1alpha1/volumes/550e8400-e29b-41d4-a716-446655440000`
+- **Given:** PVC exists with `dcm-instance-id = "app-data-volume"`
+- **When:** GET `/api/v1alpha1/volumes/app-data-volume`
 - **Then:**
   - Response: 200 OK
   - Response body includes:
-    - `id`: `"550e8400-e29b-41d4-a716-446655440000"`
-    - `path`: `"volumes/550e8400-e29b-41d4-a716-446655440000"`
+    - `id`: `"app-data-volume"`
+    - `path`: `"volumes/app-data-volume"`
     - `spec.capacity`: PVC size
     - `spec.metadata.name`: PVC name
     - `spec.metadata.storage_class`: StorageClass name
@@ -303,8 +303,8 @@ or are not runnable.
 
 - **Priority:** High
 - **Type:** Integration
-- **Given:** No PVC with `dcm-instance-id` matching the UUID
-- **When:** GET `/api/v1alpha1/volumes/550e8400-e29b-41d4-a716-446655440099`
+- **Given:** No PVC with `dcm-instance-id` matching the requested ID
+- **When:** GET `/api/v1alpha1/volumes/nonexistent-volume-id`
 - **Then:** Response: 404 Not Found
 
 ### TC-I034: LIST volumes returns all managed PVCs
@@ -340,73 +340,11 @@ or are not runnable.
 
 ---
 
-## 5 · PVC Expansion (Real Kubernetes)
+## 5 · PVC Expansion (Out of v1 Scope)
 
-> **Phase:** Volume CRUD follow-up  
-> **Suggested Ginkgo structure:** `Describe("PVC Expansion")`
-
-### TC-I040: Expand volume when StorageClass allows
-
-- **Priority:** High
-- **Type:** Integration
-- **Given:**
-  - PVC exists with capacity `10Gi`
-  - PVC uses StorageClass `ceph-rbd` (allowVolumeExpansion: true)
-- **When:** PATCH `/api/v1alpha1/volumes/{volume_id}` with `{"capacity": "20Gi"}`
-- **Then:**
-  - Response: 200 OK
-  - PVC `spec.resources.requests.storage` updated to `20Gi`
-  - PVC status may show `Resizing` condition
-
-### TC-I041: Reject expansion when StorageClass disallows
-
-- **Priority:** High
-- **Type:** Integration
-- **Given:**
-  - PVC uses StorageClass `nfs` (allowVolumeExpansion: false)
-- **When:** PATCH with larger capacity
-- **Then:**
-  - Response: 400 Bad Request
-  - Error message: "StorageClass 'nfs' does not allow volume expansion"
-
-### TC-I042: Reject expansion to smaller size
-
-- **Priority:** High
-- **Type:** Integration
-- **Given:** PVC with capacity `100Gi`
-- **When:** PATCH with `capacity: "50Gi"`
-- **Then:**
-  - Response: 400 Bad Request
-  - Error message: "cannot decrease volume size"
-
-### TC-I043: Reject expansion to same size
-
-- **Priority:** Medium
-- **Type:** Integration
-- **Given:** PVC with capacity `100Gi`
-- **When:** PATCH with `capacity: "100Gi"`
-- **Then:**
-  - Response: 400 Bad Request
-  - Error message: "new size must be larger than current size"
-
-### TC-I044: Sequential expansions work
-
-- **Priority:** High
-- **Type:** Integration
-- **Given:** PVC with capacity `10Gi` (expandable StorageClass)
-- **When:**
-  - PATCH to `20Gi`
-  - Wait for expansion complete
-  - PATCH to `50Gi`
-- **Then:** Both expansions succeed
-
-### TC-I045: Expansion of non-existent volume returns 404
-
-- **Priority:** Medium
-- **Type:** Integration
-- **Given:** No PVC with given ID
-- **When:** PATCH volume
-- **Then:** Response: 404 Not Found
+Day-2 `UPDATE` (capacity expansion) is a **non-goal** for v1, matching the
+container SP pattern. No `PATCH` endpoint is defined in `api/v1alpha1/openapi.yaml`.
+Expansion test cases are excluded from v1 (post-v1 enhancement scope).
 
 ---
 
@@ -464,7 +402,7 @@ or are not runnable.
 - **Then:**
   - CloudEvent published to `dcm.storage`
   - Event has `type: "dcm.status.storage"`
-  - Event data: `{"id": "<uuid>", "status": "PROVISIONING", "message": "..."}`
+  - Event data: `{"id": "app-data-volume", "status": "PROVISIONING", "message": "..."}`
 
 ### TC-I061: CloudEvent published on PVC bind
 
@@ -495,7 +433,7 @@ or are not runnable.
 - **Given:** Any PVC status change
 - **When:** CloudEvent is published
 - **Then:** Event has required fields:
-  - `id` (event ID, UUID)
+  - `id` (non-empty unique event identifier)
   - `source: "dcm/providers/{provider-name}"`
   - `type: "dcm.status.storage"`
   - `subject: "dcm.storage"`
@@ -579,17 +517,10 @@ or are not runnable.
 - **When:** Create PVCs with different `provider_hints.kubernetes.storage_class` values
 - **Then:** Each PVC uses the specified StorageClass
 
-### TC-I081: Expansion behavior differs by backend
+### TC-I081: Expansion behavior differs by backend (Out of v1 Scope)
 
-- **Priority:** High
-- **Type:** Integration
-- **Given:**
-  - PVC-A uses `ceph-rbd` (allowVolumeExpansion: true)
-  - PVC-B uses `nfs` (allowVolumeExpansion: false)
-- **When:** Attempt to expand both
-- **Then:**
-  - PVC-A expansion succeeds
-  - PVC-B expansion fails with clear error
+Day-2 `UPDATE` (capacity expansion) is out of v1 scope. This scenario applies when
+volume expansion is added in a post-v1 enhancement.
 
 ### TC-I082: Verify default StorageClass used when not specified
 

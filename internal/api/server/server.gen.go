@@ -33,9 +33,6 @@ type ServerInterface interface {
 	// Get Volume
 	// (GET /api/v1alpha1/volumes/{volume_id})
 	GetVolume(w http.ResponseWriter, r *http.Request, volumeId VolumeIdPath)
-	// Update Volume
-	// (PATCH /api/v1alpha1/volumes/{volume_id})
-	UpdateVolume(w http.ResponseWriter, r *http.Request, volumeId VolumeIdPath)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -69,12 +66,6 @@ func (_ Unimplemented) DeleteVolume(w http.ResponseWriter, r *http.Request, volu
 // Get Volume
 // (GET /api/v1alpha1/volumes/{volume_id})
 func (_ Unimplemented) GetVolume(w http.ResponseWriter, r *http.Request, volumeId VolumeIdPath) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Update Volume
-// (PATCH /api/v1alpha1/volumes/{volume_id})
-func (_ Unimplemented) UpdateVolume(w http.ResponseWriter, r *http.Request, volumeId VolumeIdPath) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -132,7 +123,7 @@ func (siw *ServerInterfaceWrapper) CreateVolume(w http.ResponseWriter, r *http.R
 
 	// ------------- Optional query parameter "id" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "id", r.URL.Query(), &params.Id, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "id", r.URL.Query(), &params.Id, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
 		return
@@ -171,7 +162,7 @@ func (siw *ServerInterfaceWrapper) DeleteVolume(w http.ResponseWriter, r *http.R
 	// ------------- Path parameter "volume_id" -------------
 	var volumeId VolumeIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "volume_id", chi.URLParam(r, "volume_id"), &volumeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	err = runtime.BindStyledParameterWithOptions("simple", "volume_id", chi.URLParam(r, "volume_id"), &volumeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "volume_id", Err: err})
 		return
@@ -196,7 +187,7 @@ func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Requ
 	// ------------- Path parameter "volume_id" -------------
 	var volumeId VolumeIdPath
 
-	err = runtime.BindStyledParameterWithOptions("simple", "volume_id", chi.URLParam(r, "volume_id"), &volumeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	err = runtime.BindStyledParameterWithOptions("simple", "volume_id", chi.URLParam(r, "volume_id"), &volumeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "volume_id", Err: err})
 		return
@@ -204,31 +195,6 @@ func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetVolume(w, r, volumeId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// UpdateVolume operation middleware
-func (siw *ServerInterfaceWrapper) UpdateVolume(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "volume_id" -------------
-	var volumeId VolumeIdPath
-
-	err = runtime.BindStyledParameterWithOptions("simple", "volume_id", chi.URLParam(r, "volume_id"), &volumeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "volume_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateVolume(w, r, volumeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -365,9 +331,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1alpha1/volumes/{volume_id}", wrapper.GetVolume)
-	})
-	r.Group(func(r chi.Router) {
-		r.Patch(options.BaseURL+"/api/v1alpha1/volumes/{volume_id}", wrapper.UpdateVolume)
 	})
 
 	return r
@@ -617,99 +580,6 @@ func (response GetVolume500ApplicationProblemPlusJSONResponse) VisitGetVolumeRes
 	return err
 }
 
-type UpdateVolumeRequestObject struct {
-	VolumeId VolumeIdPath `json:"volume_id"`
-	Body     *UpdateVolumeJSONRequestBody
-}
-
-type UpdateVolumeResponseObject interface {
-	VisitUpdateVolumeResponse(w http.ResponseWriter) error
-}
-
-type UpdateVolume200JSONResponse Volume
-
-func (response UpdateVolume200JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume400ApplicationProblemPlusJSONResponse Error
-
-func (response UpdateVolume400ApplicationProblemPlusJSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume404ApplicationProblemPlusJSONResponse Error
-
-func (response UpdateVolume404ApplicationProblemPlusJSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume409ApplicationProblemPlusJSONResponse Error
-
-func (response UpdateVolume409ApplicationProblemPlusJSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume422ApplicationProblemPlusJSONResponse Error
-
-func (response UpdateVolume422ApplicationProblemPlusJSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(422)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume500ApplicationProblemPlusJSONResponse Error
-
-func (response UpdateVolume500ApplicationProblemPlusJSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// List Volumes
@@ -727,9 +597,6 @@ type StrictServerInterface interface {
 	// Get Volume
 	// (GET /api/v1alpha1/volumes/{volume_id})
 	GetVolume(ctx context.Context, request GetVolumeRequestObject) (GetVolumeResponseObject, error)
-	// Update Volume
-	// (PATCH /api/v1alpha1/volumes/{volume_id})
-	UpdateVolume(ctx context.Context, request UpdateVolumeRequestObject) (UpdateVolumeResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -889,39 +756,6 @@ func (sh *strictHandler) GetVolume(w http.ResponseWriter, r *http.Request, volum
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetVolumeResponseObject); ok {
 		if err := validResponse.VisitGetVolumeResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// UpdateVolume operation middleware
-func (sh *strictHandler) UpdateVolume(w http.ResponseWriter, r *http.Request, volumeId VolumeIdPath) {
-	var request UpdateVolumeRequestObject
-
-	request.VolumeId = volumeId
-
-	var body UpdateVolumeJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UpdateVolume(ctx, request.(UpdateVolumeRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UpdateVolume")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UpdateVolumeResponseObject); ok {
-		if err := validResponse.VisitUpdateVolumeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

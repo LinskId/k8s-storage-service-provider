@@ -51,11 +51,6 @@ func (h *Handler) GetVolume(_ context.Context, _ oapigen.GetVolumeRequestObject)
 	return oapigen.GetVolume500ApplicationProblemPlusJSONResponse(err), nil
 }
 
-func (h *Handler) UpdateVolume(_ context.Context, _ oapigen.UpdateVolumeRequestObject) (oapigen.UpdateVolumeResponseObject, error) {
-	err := notImplemented()
-	return oapigen.UpdateVolume500ApplicationProblemPlusJSONResponse(err), nil
-}
-
 func (h *Handler) DeleteVolume(_ context.Context, _ oapigen.DeleteVolumeRequestObject) (oapigen.DeleteVolumeResponseObject, error) {
 	err := notImplemented()
 	return oapigen.DeleteVolume500ApplicationProblemPlusJSONResponse(err), nil

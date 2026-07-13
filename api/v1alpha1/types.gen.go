@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for ErrorType.
@@ -214,7 +212,7 @@ type Volume struct {
 	CreateTime *time.Time `json:"create_time,omitempty"`
 
 	// Id DCM instance ID (dcm-instance-id label)
-	Id *openapi_types.UUID `json:"id,omitempty"`
+	Id *string `json:"id,omitempty"`
 
 	// Path Resource path identifier
 	Path *string `json:"path,omitempty"`
@@ -259,14 +257,8 @@ type VolumeMetadata struct {
 // VolumeMode PVC volume mode
 type VolumeMode string
 
-// VolumeUpdate Volume update payload (capacity expansion only in v1)
-type VolumeUpdate struct {
-	// Capacity New storage capacity (must be greater than current)
-	Capacity string `json:"capacity"`
-}
-
 // VolumeIdPath defines model for VolumeIdPath.
-type VolumeIdPath = openapi_types.UUID
+type VolumeIdPath = string
 
 // ListVolumesParams defines parameters for ListVolumes.
 type ListVolumesParams struct {
@@ -279,15 +271,19 @@ type ListVolumesParams struct {
 
 // CreateVolumeParams defines parameters for CreateVolume.
 type CreateVolumeParams struct {
-	// Id DCM instance ID (UUID). Generated if omitted.
-	Id *openapi_types.UUID `form:"id,omitempty" json:"id,omitempty"`
+	// Id Optional client-specified ID for the volume. If not provided,
+	// the server will generate an ID.
+	//
+	// Requirements (per AEP-122):
+	// - 1-63 characters long
+	// - Start with a lowercase letter or digit
+	// - Contain only lowercase letters, numbers, and hyphens
+	// - End with letter or number
+	Id *string `form:"id,omitempty" json:"id,omitempty"`
 }
 
 // CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
-type CreateVolumeJSONRequestBody = StorageSpec
-
-// UpdateVolumeJSONRequestBody defines body for UpdateVolume for application/json ContentType.
-type UpdateVolumeJSONRequestBody = VolumeUpdate
+type CreateVolumeJSONRequestBody = Volume
 
 // Getter for additional properties for ProviderHints. Returns the specified
 // element and whether it was found

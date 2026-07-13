@@ -5,27 +5,35 @@ storage volumes on Kubernetes clusters using `PersistentVolumeClaim` resources.
 
 ## Overview
 
-This repository bootstraps the K8s Storage SP with DCM-standard layout: OpenAPI
-v1alpha1 contract, oapi-codegen generation, CI workflows, and AI specs/test
-plans. Application implementation (handlers, K8s store, monitoring,
-registration) lands in follow-up PRs.
+This service provider maps the portable `storage` service type to Kubernetes
+PVCs. It exposes an AEP-compliant REST API, registers with the DCM control plane,
+and reports volume lifecycle status via CloudEvents.
 
 See the [k8s-storage-sp enhancement](https://github.com/dcm-project/enhancements/blob/main/enhancements/k8s-storage-sp/k8s-storage-sp.md)
 for the full design.
 
-## Features (target)
+## Features
 
-- Volume lifecycle: CREATE, READ, UPDATE (capacity expand), DELETE
-- Portable `storage` service type mapped to PVCs
-- Status reporting via CloudEvents on NATS subject `dcm.storage`
-- DCM auto-registration and health polling
+- **Volume lifecycle** — create, read, and delete volumes via REST API (v1; no
+  UPDATE/day-2 capacity expansion)
+- **Kubernetes-native** — each volume maps to a `PersistentVolumeClaim`
+- **Portable contract** — implements the DCM `storage` service type with
+  `provider_hints.kubernetes` for StorageClass, volume mode, and access mode
+- **Status monitoring** — watches PVCs and publishes status changes via
+  CloudEvents on NATS subject `dcm.storage`
+- **Auto-registration** — registers with the DCM Service Provider Manager on
+  startup, with exponential backoff retry
+- **Health check** — exposes a resource-relative health endpoint for DCM polling
+- **AEP-compliant API** — OpenAPI v1alpha1 contract with request validation
+- **RFC 7807 errors** — problem details for all error responses
 
 ## Development
 
 ### Prerequisites
 
-- Go 1.25.5+
+- Go 1.26.0+
 - `make`
+- `golangci-lint` (for `make lint`)
 
 ### Build
 
@@ -39,11 +47,18 @@ make build
 make test
 ```
 
+### Lint
+
+```bash
+make lint       # Run golangci-lint
+make check      # fmt + vet + lint + test (full validation)
+```
+
 ### Code Generation
 
 ```bash
 make generate-api         # Regenerate types, server, and client from OpenAPI
-make check-generate-api # Verify generated code is up to date (CI)
+make check-generate-api   # Verify generated code is up to date (CI)
 make check-aep            # Validate OpenAPI against AEP (requires spectral)
 ```
 
@@ -64,7 +79,6 @@ Contract: `api/v1alpha1/openapi.yaml`
 | POST | `/api/v1alpha1/volumes` | Create volume |
 | GET | `/api/v1alpha1/volumes` | List volumes |
 | GET | `/api/v1alpha1/volumes/{volume_id}` | Get volume |
-| PATCH | `/api/v1alpha1/volumes/{volume_id}` | Expand capacity |
 | DELETE | `/api/v1alpha1/volumes/{volume_id}` | Delete volume |
 
 ## Project Structure
@@ -72,12 +86,18 @@ Contract: `api/v1alpha1/openapi.yaml`
 ```
 .
 ├── api/v1alpha1/              # OpenAPI spec and generated types
-├── cmd/k8s-storage-service-provider/  # Entry point (bootstrap stub)
-├── internal/api/server/       # Generated strict server interface
+├── cmd/k8s-storage-service-provider/
+├── internal/
+│   ├── api/server/            # Generated strict server interface
+│   ├── apiserver/
+│   ├── config/
+│   ├── handlers/
+│   ├── kubernetes/
+│   └── registration/
 ├── pkg/client/                # Generated HTTP client
 ├── .ai/
-│   ├── specs/                 # Requirements specification
-│   └── test-plans/            # Unit and integration test plans
+│   ├── specs/
+│   └── test-plans/
 └── Makefile
 ```
 

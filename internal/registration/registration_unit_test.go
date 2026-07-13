@@ -24,7 +24,7 @@ var _ = Describe("Registration Payload", func() {
 		Expect(payload.ServiceType).To(Equal("storage"))
 		Expect(payload.DisplayName).To(HaveValue(Equal("K8s Storage SP")))
 		Expect(payload.Endpoint).To(Equal("https://sp.example.com/api/v1alpha1/volumes"))
-		Expect(payload.Operations).To(HaveValue(ConsistOf("CREATE", "READ", "UPDATE", "DELETE")))
+		Expect(payload.Operations).To(HaveValue(ConsistOf("CREATE", "READ", "DELETE")))
 		Expect(payload.SchemaVersion).To(Equal("v1alpha1"))
 	})
 })

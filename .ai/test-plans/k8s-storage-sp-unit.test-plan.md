@@ -86,12 +86,14 @@ pure logic.
 
 - **Priority:** High
 - **Type:** Unit
-- **Given:** DCM request with only `capacity`, `metadata.name`, and `service_type: storage`
+- **Given:** DCM create request with only `spec.capacity`, `spec.metadata.name`, and `spec.service_type: storage`
   ```json
   {
-    "service_type": "storage",
-    "capacity": "100Gi",
-    "metadata": {"name": "test-volume"}
+    "spec": {
+      "service_type": "storage",
+      "capacity": "100Gi",
+      "metadata": {"name": "test-volume"}
+    }
   }
   ```
 - **When:** PVC spec is built
@@ -299,7 +301,7 @@ pure logic.
 - **Given:** PVC status change (Pending → Bound)
 - **When:** CloudEvent is constructed
 - **Then:** CloudEvent has:
-  - `id`: non-empty UUID
+  - `id`: non-empty unique identifier
   - `source`: `"dcm/providers/{provider-name}"`
   - `type`: `"dcm.status.storage"`
   - `subject`: `"dcm.storage"`
@@ -331,49 +333,10 @@ pure logic.
 
 ---
 
-## 6 · Volume Expansion Validation
+## 6 · Volume Expansion Validation (Out of v1 Scope)
 
-> **Suggested Ginkgo structure:** `Describe("Volume Expansion Validation")`
-
-### TC-U050: Validate expansion size is larger than current
-
-- **Priority:** High
-- **Type:** Unit
-- **Given:** 
-  - Current PVC capacity: `100Gi`
-  - Expansion request: `150Gi`
-- **When:** Expansion is validated
-- **Then:** Validation passes
-
-### TC-U051: Reject expansion to smaller size
-
-- **Priority:** High
-- **Type:** Unit
-- **Given:**
-  - Current PVC capacity: `100Gi`
-  - Expansion request: `50Gi`
-- **When:** Expansion is validated
-- **Then:** Validation error: "cannot decrease volume size"
-
-### TC-U052: Reject expansion to same size
-
-- **Priority:** Medium
-- **Type:** Unit
-- **Given:**
-  - Current PVC capacity: `100Gi`
-  - Expansion request: `100Gi`
-- **When:** Expansion is validated
-- **Then:** Validation error: "new size must be larger than current size"
-
-### TC-U053: Validate StorageClass allows expansion (mocked)
-
-- **Priority:** High
-- **Type:** Unit
-- **Given:**
-  - PVC uses StorageClass with `allowVolumeExpansion = false`
-  - Expansion requested
-- **When:** Expansion is validated (StorageClass mocked)
-- **Then:** Validation error: "StorageClass does not allow volume expansion"
+Day-2 `UPDATE` (capacity expansion) is out of v1 scope. No expansion validation
+or `PATCH` handler tests apply to v1.
 
 ---
 
@@ -451,31 +414,6 @@ pure logic.
 - **When:** GET /volumes/nonexistent handler is called
 - **Then:**
   - Response status: 404 Not Found
-
-### TC-U067: PATCH /volumes/{id} updates PVC capacity
-
-- **Priority:** High
-- **Type:** Unit
-- **Given:**
-  - Mocked K8s client with PVC (capacity: 100Gi, allowVolumeExpansion: true)
-  - Expansion request: 150Gi
-- **When:** PATCH /volumes/{id} handler is called
-- **Then:**
-  - Mocked K8s client `Update(PVC)` called once
-  - Response status: 200 OK
-  - Response shows new capacity: 150Gi
-
-### TC-U068: PATCH /volumes/{id} rejects when StorageClass disallows
-
-- **Priority:** High
-- **Type:** Unit
-- **Given:**
-  - Mocked K8s client with PVC (StorageClass: allowVolumeExpansion = false)
-  - Expansion request
-- **When:** PATCH /volumes/{id} handler is called
-- **Then:**
-  - Response status: 400 Bad Request
-  - Error message: "StorageClass does not allow volume expansion"
 
 ### TC-U069: DELETE /volumes/{id} deletes PVC
 

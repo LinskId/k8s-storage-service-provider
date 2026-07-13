@@ -1,3 +1,4 @@
+// Package store defines interfaces for storage and health-check abstractions.
 package store
 
 import "context"

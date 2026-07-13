@@ -77,17 +77,28 @@ paths:
       parameters:
         - name: id
           in: query
+          description: |
+            Optional client-specified ID for the volume. If not provided,
+            the server will generate an ID.
+
+            Requirements (per AEP-122):
+            - 1-63 characters long
+            - Start with a lowercase letter or digit
+            - Contain only lowercase letters, numbers, and hyphens
+            - End with letter or number
           required: false
           schema:
             type: string
-            format: uuid
-          description: DCM instance ID (UUID). Generated if omitted.
+            pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+            minLength: 1
+            maxLength: 63
+          example: app-data-volume
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StorageSpec'
+              $ref: '#/components/schemas/Volume'
       responses:
         '201':
           description: Volume created successfully
@@ -164,58 +175,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-    patch:
-      summary: Update Volume
-      description: Update a storage volume. v1 supports capacity expansion only.
-      operationId: updateVolume
-      tags:
-        - Volumes
-      parameters:
-        - $ref: '#/components/parameters/VolumeIdPath'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/VolumeUpdate'
-      responses:
-        '200':
-          description: Volume update initiated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Volume'
-        '400':
-          description: Invalid capacity (shrinking not supported)
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Volume not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: A ResourceQuota limiting requests.storage in the configured namespace would be exceeded
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: StorageClass does not allow volume expansion
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Internal server error
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
     delete:
       summary: Delete Volume
       description: Delete a specific volume instance (PVC)
@@ -248,8 +207,9 @@ components:
       required: true
       schema:
         type: string
-        format: uuid
+        pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
       description: DCM instance ID (dcm-instance-id label)
+      example: app-data-volume
 
   schemas:
     Health:
@@ -396,18 +356,6 @@ components:
         provider_hints:
           $ref: '#/components/schemas/ProviderHints'
 
-    VolumeUpdate:
-      type: object
-      description: Volume update payload (capacity expansion only in v1)
-      required:
-        - capacity
-      properties:
-        capacity:
-          type: string
-          description: New storage capacity (must be greater than current)
-          pattern: '^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
-          example: "200Gi"
-
     Volume:
       type: object
       description: Volume resource representing a PVC instance
@@ -422,14 +370,17 @@ components:
       properties:
         id:
           type: string
-          format: uuid
           readOnly: true
           description: DCM instance ID (dcm-instance-id label)
+          pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+          minLength: 1
+          maxLength: 63
+          example: app-data-volume
         path:
           type: string
           readOnly: true
           description: Resource path identifier
-          example: "volumes/123e4567-e89b-12d3-a456-426614174000"
+          example: "volumes/app-data-volume"
         spec:
           $ref: '#/components/schemas/StorageSpec'
         status:

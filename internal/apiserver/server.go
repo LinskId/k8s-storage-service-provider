@@ -332,7 +332,6 @@ func New(cfg *config.Config, logger *slog.Logger, handler oapigen.ServerInterfac
 		logger.Warn("failed to resolve POST path from OpenAPI spec, trailing-slash guards disabled", "error", pathErr)
 	} else {
 		r.Get(postPath+"/", emptyIDHandler)
-		r.Patch(postPath+"/", emptyIDHandler)
 		r.Delete(postPath+"/", emptyIDHandler)
 	}
 

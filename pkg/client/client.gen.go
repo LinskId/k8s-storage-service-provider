@@ -106,11 +106,6 @@ type ClientInterface interface {
 
 	// GetVolume request
 	GetVolume(ctx context.Context, volumeId VolumeIdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// UpdateVolumeWithBody request with any body
-	UpdateVolumeWithBody(ctx context.Context, volumeId VolumeIdPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	UpdateVolume(ctx context.Context, volumeId VolumeIdPath, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) ListVolumes(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -175,30 +170,6 @@ func (c *Client) DeleteVolume(ctx context.Context, volumeId VolumeIdPath, reqEdi
 
 func (c *Client) GetVolume(ctx context.Context, volumeId VolumeIdPath, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVolumeRequest(c.Server, volumeId)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) UpdateVolumeWithBody(ctx context.Context, volumeId VolumeIdPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateVolumeRequestWithBody(c.Server, volumeId, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) UpdateVolume(ctx context.Context, volumeId VolumeIdPath, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateVolumeRequest(c.Server, volumeId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +280,7 @@ func NewCreateVolumeRequestWithBody(server string, params *CreateVolumeParams, c
 
 		if params.Id != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "id", *params.Id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "id", *params.Id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -369,7 +340,7 @@ func NewDeleteVolumeRequest(server string, volumeId VolumeIdPath) (*http.Request
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "volume_id", volumeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "volume_id", volumeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +374,7 @@ func NewGetVolumeRequest(server string, volumeId VolumeIdPath) (*http.Request, e
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "volume_id", volumeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "volume_id", volumeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
 	if err != nil {
 		return nil, err
 	}
@@ -427,53 +398,6 @@ func NewGetVolumeRequest(server string, volumeId VolumeIdPath) (*http.Request, e
 	if err != nil {
 		return nil, err
 	}
-
-	return req, nil
-}
-
-// NewUpdateVolumeRequest calls the generic UpdateVolume builder with application/json body
-func NewUpdateVolumeRequest(server string, volumeId VolumeIdPath, body UpdateVolumeJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewUpdateVolumeRequestWithBody(server, volumeId, "application/json", bodyReader)
-}
-
-// NewUpdateVolumeRequestWithBody generates requests for UpdateVolume with any type of body
-func NewUpdateVolumeRequestWithBody(server string, volumeId VolumeIdPath, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "volume_id", volumeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1alpha1/volumes/%s", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("PATCH", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -537,11 +461,6 @@ type ClientWithResponsesInterface interface {
 
 	// GetVolumeWithResponse request
 	GetVolumeWithResponse(ctx context.Context, volumeId VolumeIdPath, reqEditors ...RequestEditorFn) (*GetVolumeResponse, error)
-
-	// UpdateVolumeWithBodyWithResponse request with any body
-	UpdateVolumeWithBodyWithResponse(ctx context.Context, volumeId VolumeIdPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
-
-	UpdateVolumeWithResponse(ctx context.Context, volumeId VolumeIdPath, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
 }
 
 type ListVolumesResponse struct {
@@ -663,33 +582,6 @@ func (r GetVolumeResponse) StatusCode() int {
 	return 0
 }
 
-type UpdateVolumeResponse struct {
-	Body                      []byte
-	HTTPResponse              *http.Response
-	JSON200                   *Volume
-	ApplicationproblemJSON400 *Error
-	ApplicationproblemJSON404 *Error
-	ApplicationproblemJSON409 *Error
-	ApplicationproblemJSON422 *Error
-	ApplicationproblemJSON500 *Error
-}
-
-// Status returns HTTPResponse.Status
-func (r UpdateVolumeResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r UpdateVolumeResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 // ListVolumesWithResponse request returning *ListVolumesResponse
 func (c *ClientWithResponses) ListVolumesWithResponse(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error) {
 	rsp, err := c.ListVolumes(ctx, params, reqEditors...)
@@ -741,23 +633,6 @@ func (c *ClientWithResponses) GetVolumeWithResponse(ctx context.Context, volumeI
 		return nil, err
 	}
 	return ParseGetVolumeResponse(rsp)
-}
-
-// UpdateVolumeWithBodyWithResponse request with arbitrary body returning *UpdateVolumeResponse
-func (c *ClientWithResponses) UpdateVolumeWithBodyWithResponse(ctx context.Context, volumeId VolumeIdPath, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
-	rsp, err := c.UpdateVolumeWithBody(ctx, volumeId, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseUpdateVolumeResponse(rsp)
-}
-
-func (c *ClientWithResponses) UpdateVolumeWithResponse(ctx context.Context, volumeId VolumeIdPath, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
-	rsp, err := c.UpdateVolume(ctx, volumeId, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseUpdateVolumeResponse(rsp)
 }
 
 // ParseListVolumesResponse parses an HTTP response from a ListVolumesWithResponse call
@@ -940,67 +815,6 @@ func ParseGetVolumeResponse(rsp *http.Response) (*GetVolumeResponse, error) {
 			return nil, err
 		}
 		response.ApplicationproblemJSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseUpdateVolumeResponse parses an HTTP response from a UpdateVolumeWithResponse call
-func ParseUpdateVolumeResponse(rsp *http.Response) (*UpdateVolumeResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &UpdateVolumeResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Volume
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON409 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.ApplicationproblemJSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest Error

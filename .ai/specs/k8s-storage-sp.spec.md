@@ -5,7 +5,7 @@
 The Kubernetes Storage Service Provider (K8s Storage SP) is a REST API that
 manages persistent storage volumes on Kubernetes clusters using
 `PersistentVolumeClaim` (PVC) resources. It exposes endpoints for creating,
-reading, updating (capacity expansion), and deleting volumes; integrates with
+reading, and deleting volumes; integrates with
 the DCM Service Provider Registry; reports resource status via CloudEvents over
 NATS; and exposes a health endpoint for DCM control plane polling.
 
@@ -16,8 +16,8 @@ driver.
 
 **Version scope (v1):**
 
-- Full CRUD on volume instances: CREATE, READ, UPDATE (capacity expansion only),
-  DELETE
+- Volume lifecycle: CREATE, READ, DELETE — as defined in `api/v1alpha1/openapi.yaml`
+  (no UPDATE; day-2 capacity expansion is out of scope, per container SP pattern)
 - Kubernetes PVCs only (no StorageClass provisioning, snapshots, clones, or
   cross-cluster migration)
 - Single configured namespace for all managed PVCs (not overridable per volume)
@@ -336,23 +336,24 @@ Implement all volume operations defined in the OpenAPI specification. Wire each
 endpoint to the `VolumeRepository` interface (§4.4, REQ-STR-*). Map store and
 validation errors to RFC 7807 responses.
 
-The portable contract is `StorageSpec` on create; responses use the `Volume`
-resource with read-only `id`, `path`, `status`, and timestamps.
+The portable contract is `StorageSpec` in the create request `Volume.spec`;
+responses use the full `Volume` resource with read-only `id`, `path`, `status`,
+and timestamps.
 
 Out of scope: authentication/authorization (401/403), workload attachment
-(creating Pods that mount PVCs).
+(creating Pods that mount PVCs), UPDATE / day-2 capacity expansion.
 
 #### Requirements
 
 | ID | Requirement | Priority | Notes |
 |----|-------------|----------|-------|
 | REQ-API-010 | The SP MUST implement all API operations defined in the OpenAPI specification | MUST | |
-| REQ-API-020 | POST `/api/v1alpha1/volumes` MUST accept a `StorageSpec` body and return 201 Created with a `Volume` | MUST | |
-| REQ-API-030 | When no `id` query parameter is provided, the server MUST generate a UUID for the volume instance | MUST | |
-| REQ-API-040 | When an `id` query parameter is provided, the server MUST use it as the DCM instance ID (UUID) | MUST | |
-| REQ-API-041 | When an `id` query parameter is provided, it MUST be a valid UUID | MUST | OpenAPI `format: uuid` |
-| REQ-API-050 | `service_type` in the request MUST be `"storage"` | MUST | |
-| REQ-API-060 | POST MUST require `capacity`, `metadata.name`, and `service_type` | MUST | |
+| REQ-API-020 | POST `/api/v1alpha1/volumes` MUST accept a `Volume` body (portable fields in `spec`) and return 201 Created with a `Volume` | MUST | AEP-133 |
+| REQ-API-030 | When no `id` query parameter is provided, the server MUST generate a DCM instance ID conforming to AEP-122 | MUST | |
+| REQ-API-040 | When an `id` query parameter is provided, the server MUST use it as the DCM instance ID | MUST | |
+| REQ-API-041 | When an `id` query parameter is provided, it MUST conform to AEP-122 pattern `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$` | MUST | |
+| REQ-API-050 | `spec.service_type` in the request MUST be `"storage"` | MUST | |
+| REQ-API-060 | POST `spec` MUST require `capacity`, `metadata.name`, and `service_type` | MUST | |
 | REQ-API-070 | `metadata.name` MUST conform to Kubernetes DNS-1123 subdomain label rules and MUST NOT exceed 63 characters | MUST | OpenAPI `maxLength: 63` |
 | REQ-API-080 | Newly created volumes MUST have `status` set to `PROVISIONING` when the PVC is not yet fully bound/ready | MUST | |
 | REQ-API-090 | The create response MUST populate read-only fields: `id`, `path`, `status`, `create_time`, `update_time`, and `metadata.namespace` | MUST | |
@@ -363,11 +364,6 @@ Out of scope: authentication/authorization (401/403), workload attachment
 | REQ-API-130 | GET MUST support `max_page_size` (default 50, max 1000) and `page_token` | MUST | |
 | REQ-API-140 | GET `/api/v1alpha1/volumes/{volume_id}` MUST return 200 with the volume when found | MUST | |
 | REQ-API-150 | GET MUST return 404 when no PVC matches the `volume_id` (`dcm-instance-id` label) | MUST | |
-| REQ-API-160 | PATCH `/api/v1alpha1/volumes/{volume_id}` MUST accept `VolumeUpdate` with required `capacity` | MUST | |
-| REQ-API-170 | PATCH MUST reject shrinking (new capacity ≤ current request) with 400 | MUST | |
-| REQ-API-180 | PATCH MUST return 422 when StorageClass `allowVolumeExpansion` is not true | MUST | |
-| REQ-API-190 | PATCH MUST return 409 when a namespace `ResourceQuota` on `requests.storage` would be exceeded | MUST | |
-| REQ-API-200 | PATCH success MUST return 200 with updated `Volume`; expansion completes asynchronously in Kubernetes | MUST | DD-030 |
 | REQ-API-210 | DELETE `/api/v1alpha1/volumes/{volume_id}` MUST return 204 when delete is accepted | MUST | |
 | REQ-API-211 | A GET request for a deleted volume MUST return 404 Not Found | MUST | |
 | REQ-API-220 | DELETE MUST return 404 when the volume does not exist | MUST | |
@@ -382,8 +378,7 @@ Out of scope: authentication/authorization (401/403), workload attachment
 | Invalid request body / validation | 400 | INVALID_ARGUMENT |
 | Volume not found | 404 | NOT_FOUND |
 | PVC name already exists | 409 | ALREADY_EXISTS |
-| ResourceQuota exceeded on PATCH | 409 | ALREADY_EXISTS |
-| StorageClass missing / expansion not allowed | 422 | FAILED_PRECONDITION |
+| StorageClass missing | 422 | FAILED_PRECONDITION |
 | Unexpected error | 500 | INTERNAL |
 
 #### Acceptance Criteria
@@ -391,7 +386,7 @@ Out of scope: authentication/authorization (401/403), workload attachment
 ##### AC-API-010: Create volume — success
 
 - **Validates:** REQ-API-020, REQ-API-080, REQ-API-090
-- **Given** a valid `StorageSpec` with `capacity`, `metadata.name`, and `service_type: storage`
+- **Given** a valid create `Volume` with `spec.capacity`, `spec.metadata.name`, and `spec.service_type: storage`
 - **When** POST `/api/v1alpha1/volumes` is called
 - **Then** the response MUST be 201 Created with a `Volume` including `status: PROVISIONING`
 
@@ -400,14 +395,14 @@ Out of scope: authentication/authorization (401/403), workload attachment
 - **Validates:** REQ-API-030
 - **Given** POST `/api/v1alpha1/volumes` is called without `?id=`
 - **When** the volume is created
-- **Then** the response MUST contain a server-generated UUID as the `id` field
+- **Then** the response MUST contain a server-generated ID as the `id` field
 
 ##### AC-API-012: Create volume — client-specified ID
 
 - **Validates:** REQ-API-040, REQ-API-041
-- **Given** POST `/api/v1alpha1/volumes?id=550e8400-e29b-41d4-a716-446655440000` is called
+- **Given** POST `/api/v1alpha1/volumes?id=app-data-volume` is called
 - **When** the volume is created
-- **Then** the response `id` field MUST be `"550e8400-e29b-41d4-a716-446655440000"`
+- **Then** the response `id` field MUST be `"app-data-volume"`
 
 ##### AC-API-013: Create volume — read-only fields
 
@@ -415,7 +410,7 @@ Out of scope: authentication/authorization (401/403), workload attachment
 - **Given** a volume is created successfully
 - **When** the response is returned
 - **Then** the following fields MUST be populated:
-  - `id`: server-generated or client-specified UUID
+  - `id`: server-generated or client-specified DCM instance ID (AEP-122)
   - `path`: `"volumes/{volume_id}"`
   - `status`: `"PROVISIONING"` (when PVC is not yet fully bound/ready)
   - `create_time`: current timestamp
@@ -471,44 +466,16 @@ Out of scope: authentication/authorization (401/403), workload attachment
 ##### AC-API-040: Get volume — success
 
 - **Validates:** REQ-API-140
-- **Given** a volume with id `550e8400-e29b-41d4-a716-446655440000` exists
-- **When** GET `/api/v1alpha1/volumes/550e8400-e29b-41d4-a716-446655440000` is called
+- **Given** a volume with id `app-data-volume` exists
+- **When** GET `/api/v1alpha1/volumes/app-data-volume` is called
 - **Then** the response MUST be 200 OK with the `Volume` body
 
 ##### AC-API-041: Get volume — not found
 
 - **Validates:** REQ-API-150
-- **Given** no volume with id `550e8400-e29b-41d4-a716-446655440099` exists
+- **Given** no volume with id `nonexistent-volume-id` exists
 - **When** GET is called with that `volume_id`
 - **Then** the response MUST be 404 Not Found with an RFC 7807 error body
-
-##### AC-API-050: Patch volume — reject shrink
-
-- **Validates:** REQ-API-170
-- **Given** a volume with capacity `100Gi`
-- **When** PATCH is called with `capacity: 50Gi`
-- **Then** the response MUST be 400 Bad Request with an RFC 7807 error body
-
-##### AC-API-051: Patch volume — expansion not allowed
-
-- **Validates:** REQ-API-180
-- **Given** a volume bound to a StorageClass with `allowVolumeExpansion: false`
-- **When** PATCH is called with a larger `capacity`
-- **Then** the response MUST be 422 Failed Precondition
-
-##### AC-API-052: Patch volume — quota exceeded
-
-- **Validates:** REQ-API-190
-- **Given** a namespace `ResourceQuota` on `requests.storage` would be exceeded by the expansion
-- **When** PATCH is called with a larger `capacity`
-- **Then** the response MUST be 409 Conflict
-
-##### AC-API-053: Patch volume — success
-
-- **Validates:** REQ-API-200
-- **Given** a volume with expandable StorageClass and sufficient quota
-- **When** PATCH is called with a larger `capacity`
-- **Then** the response MUST be 200 OK with the updated `Volume`
 
 ##### AC-API-060: Delete volume — success
 
@@ -561,7 +528,7 @@ Depends on Topic 1 (HTTP Server) and Topic 4 (Kubernetes Integration & Store).
 Define a volume storage interface that abstracts volume persistence operations.
 Implement it backed by Kubernetes PVCs. Manage PVC lifecycle in a single
 configured namespace. Apply DCM labels, resolve StorageClass and access
-mode defaults, and validate preconditions for create and patch.
+mode defaults, and validate preconditions for create.
 
 Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 
@@ -569,13 +536,12 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 
 | ID | Requirement | Priority | Notes |
 |----|-------------|----------|-------|
-| REQ-STR-010 | The SP MUST define a `VolumeRepository` interface with Create, Get, List, Update, Delete, and CheckHealth operations | MUST | DD-040 |
+| REQ-STR-010 | The SP MUST define a `VolumeRepository` interface with Create, Get, List, Delete, and CheckHealth operations | MUST | DD-040 |
 | REQ-STR-020 | The Create operation MUST return the created `Volume` with all server-generated read-only fields populated | MUST | |
 | REQ-STR-030 | The Create operation MUST return a conflict error if a volume with the same `metadata.name` or instance ID already exists | MUST | |
 | REQ-STR-040 | The Get operation MUST return the matching `Volume` for a valid `volume_id`, or a not-found error if no match exists | MUST | |
 | REQ-STR-050 | The List operation MUST accept pagination parameters (`max_page_size`, `page_token`) and return a paginated `VolumeList` | MUST | |
 | REQ-STR-060 | The List operation MUST default to `max_page_size=50` when not specified | MUST | |
-| REQ-STR-070 | The Update operation MUST apply a `VolumeUpdate` (capacity expansion) to the matching volume, or return not-found if no match exists | MUST | |
 | REQ-STR-080 | The Delete operation MUST delete the volume matching the `volume_id`, or return a not-found error if no match exists | MUST | |
 | REQ-STR-090 | The store MUST define typed errors for not-found, conflict, invalid-argument, and failed-precondition conditions so API handlers can map them to HTTP status codes | MUST | |
 | REQ-STR-100 | CheckHealth MUST return an error when the backing Kubernetes API is unreachable | MUST | REQ-HLT-050, REQ-HLT-070 |
@@ -599,8 +565,6 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 | REQ-K8S-100 | Default access mode when omitted MUST come from `SP_K8S_DEFAULT_ACCESS_MODE` (default `ReadWriteOnce`) | MUST | |
 | REQ-K8S-110 | `provider_hints.kubernetes.volume_mode` MUST map to PVC `volumeMode` (`Filesystem` or `Block`) | MUST | |
 | REQ-K8S-120 | POST MUST verify the StorageClass exists before creating the PVC | MUST | |
-| REQ-K8S-130 | PATCH MUST read the bound StorageClass and verify `allowVolumeExpansion: true` | MUST | |
-| REQ-K8S-140 | PATCH MUST pre-check namespace `ResourceQuota` limits on `requests.storage` when such quotas exist | MUST | |
 | REQ-K8S-150 | DELETE MUST issue a Kubernetes delete on the PVC; Terminating PVCs remain until mounts are released | MUST | |
 | REQ-K8S-160 | User-supplied `metadata.labels` MUST NOT use reserved DCM label keys | MUST | §5.1 |
 | REQ-K8S-170 | Volume status in API responses MUST be derived from PVC phase and conditions (see §4.5 status mapping) | MUST | |
@@ -627,7 +591,7 @@ No portable-to-K8s translation layer is required.
 ##### AC-STR-010: Create operation populates read-only fields
 
 - **Validates:** REQ-STR-020
-- **Given** a valid `StorageSpec` and instance ID are passed to Create
+- **Given** a valid `Volume.spec` and instance ID are passed to Create
 - **When** the operation succeeds
 - **Then** the returned `Volume` MUST have `id`, `path`, `status`, `create_time`, `update_time`, and `metadata.namespace` populated
 
@@ -674,13 +638,6 @@ No portable-to-K8s translation layer is required.
 - **When** List is called
 - **Then** at most 50 volumes MUST be returned
 
-##### AC-STR-070: Update operation
-
-- **Validates:** REQ-STR-070
-- **Given** a volume with id `abc-123` exists
-- **When** Update is called with a larger `capacity`
-- **Then** the updated `Volume` MUST be returned
-
 ##### AC-STR-080: Delete operation
 
 - **Validates:** REQ-STR-080
@@ -713,7 +670,7 @@ No portable-to-K8s translation layer is required.
 ##### AC-STR-120: Error type — failed precondition
 
 - **Validates:** REQ-STR-090
-- **Given** a failed-precondition condition occurs (e.g., StorageClass missing, expansion not allowed)
+- **Given** a failed-precondition condition occurs (e.g., StorageClass missing)
 - **When** the error is returned
 - **Then** the error MUST be distinguishable as a failed-precondition error
 
@@ -768,20 +725,6 @@ No portable-to-K8s translation layer is required.
 - **When** the PVC is created
 - **Then** that StorageClass MUST be used
 - **And** when omitted, `SP_K8S_DEFAULT_STORAGE_CLASS` or the cluster default MUST be used
-
-##### AC-K8S-080: Expansion precondition check
-
-- **Validates:** REQ-K8S-130
-- **Given** a volume bound to a StorageClass with `allowVolumeExpansion: false`
-- **When** Update is called with a larger capacity
-- **Then** a failed-precondition error MUST be returned
-
-##### AC-K8S-090: Quota pre-check on expansion
-
-- **Validates:** REQ-K8S-140
-- **Given** a namespace `ResourceQuota` on `requests.storage` exists
-- **When** Update would exceed the quota
-- **Then** a conflict error MUST be returned
 
 ##### AC-K8S-100: Delete leaves terminating PVC
 
@@ -958,7 +901,7 @@ historical event replay.
 - **When** the event is published
 - **Then** the CloudEvent MUST include:
   - `specversion`: `"1.0"`
-  - `id`: unique event identifier (e.g., UUID)
+  - `id`: unique event identifier (non-empty)
   - `source`: `"dcm/providers/k8s-storage-sp"`
   - `type`: `"dcm.status.storage"`
   - `subject`: `"dcm.storage"`
@@ -1085,7 +1028,7 @@ integration, provider capability updates post-registration.
 | REQ-REG-030 | Registration MUST execute asynchronously | MUST | |
 | REQ-REG-031 | Registration MUST NOT block server startup | MUST | |
 | REQ-REG-040 | `service_type` MUST be `"storage"` | MUST | |
-| REQ-REG-041 | `operations` MUST include `CREATE`, `READ`, `UPDATE`, `DELETE` | MUST | |
+| REQ-REG-041 | `operations` MUST include `CREATE`, `READ`, and `DELETE` | MUST | UPDATE is out of v1 scope (container SP pattern) |
 | REQ-REG-042 | `endpoint` MUST be `{SP_ENDPOINT}/api/v1alpha1/volumes` | MUST | Derived from OpenAPI POST path; DD-010 |
 | REQ-REG-043 | `schema_version` MUST be `v1alpha1` | MUST | |
 | REQ-REG-050 | Registration MUST retry with exponential backoff on failure with a maximum backoff interval. Non-retryable errors (4xx client errors) MUST stop retries immediately | MUST | |
@@ -1125,7 +1068,7 @@ integration, provider capability updates post-registration.
   - `schema_version`: `"v1alpha1"`
   - `display_name`: configured display name (if set)
   - `endpoint`: `{provider.endpoint}/api/v1alpha1/volumes`
-  - `operations`: `["CREATE", "READ", "UPDATE", "DELETE"]`
+  - `operations`: `["CREATE", "READ", "DELETE"]`
   - `metadata.region_code`: configured region (if set)
   - `metadata.zone`: configured zone (if set)
 
@@ -1191,7 +1134,7 @@ Reserved label keys (MUST NOT be set by callers in `metadata.labels`):
 | Label | Value |
 |-------|-------|
 | `dcm.project/managed-by` | `dcm` |
-| `dcm.project/dcm-instance-id` | UUID (DCM instance ID) |
+| `dcm.project/dcm-instance-id` | DCM instance ID (AEP-122) |
 | `dcm.project/dcm-service-type` | `storage` |
 
 #### Requirements
@@ -1215,17 +1158,17 @@ Reserved label keys (MUST NOT be set by callers in `metadata.labels`):
 
 | Field | Source |
 |-------|--------|
-| `id` / `volume_id` | DCM instance UUID (`dcm-instance-id` label) |
+| `id` / `volume_id` | DCM instance ID (`dcm-instance-id` label), AEP-122 format |
 | `metadata.name` | Kubernetes PVC name (DNS-1123 subdomain) |
 | `path` | `volumes/{volume_id}` |
 
-Client may supply `?id=` on POST; otherwise the server generates a UUID.
+Client may supply `?id=` on POST (AEP-122); otherwise the server generates an ID.
 
 #### Requirements
 
 | ID | Requirement | Priority | Notes |
 |----|-------------|----------|-------|
-| REQ-XC-ID-010 | Two identifiers MUST be used for volume resources: `id` (DCM instance UUID, used in URL paths and stored as `dcm.project/dcm-instance-id` label) and `metadata.name` (used as the Kubernetes PVC name) | MUST | |
+| REQ-XC-ID-010 | Two identifiers MUST be used for volume resources: `id` (DCM instance ID in AEP-122 format, used in URL paths and stored as `dcm.project/dcm-instance-id` label) and `metadata.name` (used as the Kubernetes PVC name) | MUST | |
 | REQ-XC-ID-020 | Conflict detection on create MUST be based on `metadata.name`, not `id`. Both uniqueness constraints apply independently | MUST | REQ-API-100 |
 
 #### Acceptance Criteria
@@ -1233,7 +1176,7 @@ Client may supply `?id=` on POST; otherwise the server generates a UUID.
 ##### AC-XC-ID-010: Dual identifier usage
 
 - **Validates:** REQ-XC-ID-010
-- **Given** a volume is created with id `550e8400-e29b-41d4-a716-446655440000` and `metadata.name` `app-data`
+- **Given** a volume is created with id `app-data-volume` and `metadata.name` `app-data`
 - **When** the PVC is stored
 - **Then** `id` MUST be used in URL paths (`/volumes/{volume_id}`) and as the `dcm.project/dcm-instance-id` label
 - **And** `metadata.name` MUST be the Kubernetes PVC name `app-data`
@@ -1399,7 +1342,7 @@ errors, NATS disconnects, and HTTP panics MUST be logged at appropriate levels.
 
 **Decision:** Health is at `GET /api/v1alpha1/volumes/health` (resource-relative, for
 DCM health check integration which derives the health URL as
-`registered_endpoint + '/health'`). Volume CRUD is under `/api/v1alpha1/volumes`.
+`registered_endpoint + '/health'`). Volume API is under `/api/v1alpha1/volumes`.
 Registration endpoint is `{SP_ENDPOINT}/api/v1alpha1/volumes`.
 
 **Rationale:** SPRM's `healthcheck/monitor.go` constructs health URLs as
@@ -1431,16 +1374,6 @@ or `SP_K8S_DEFAULT_STORAGE_CLASS`.
 **Rationale:** Aligns with enhancement v1 scope; SP discovery deferred.
 
 **Related requirements:** REQ-K8S-080, REQ-API-240
-
-### DD-030: PATCH means expansion initiated, not completed
-
-**Decision:** A successful PATCH returns 200 when Kubernetes accepts the PVC
-patch. The SP reports `PROVISIONING` while resize conditions are active.
-
-**Rationale:** CSI/filesystem expansion is asynchronous; callers must monitor
-status via GET or CloudEvents.
-
-**Related requirements:** REQ-API-200, REQ-MON-120
 
 ### DD-040: Single namespace per SP instance
 
