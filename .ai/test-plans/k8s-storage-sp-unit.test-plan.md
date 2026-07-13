@@ -12,10 +12,9 @@ Unit tests verify individual components in isolation. All external dependencies
 Tests use `httptest.NewRecorder` for handler tests and direct function calls for
 pure logic.
 
-**Field naming:** SP OpenAPI uses `attachment_mode` (portable) and
-`provider_hints.kubernetes.storage_class` / `volume_mode` (snake_case). Catalog
-schema may use `provider_hints.kubernetes.access_mode`; placement translation is
-out of scope for SP unit tests unless explicitly testing catalog payloads.
+**Field naming:** SP OpenAPI and catalog `storage` service type both use
+`provider_hints.kubernetes` with snake_case keys (`storage_class`, `volume_mode`,
+`access_mode`).
 
 **No real external services:**
 - ❌ No real Kubernetes cluster
@@ -41,13 +40,13 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
   - `SP_SERVER_ADDRESS=":9090"`
   - `SP_K8S_NAMESPACE="team-a"`
   - `SP_K8S_DEFAULT_STORAGE_CLASS="ceph-rbd"`
-  - `SP_K8S_DEFAULT_ATTACHMENT_MODE="multiReadWrite"`
+  - `SP_K8S_DEFAULT_ACCESS_MODE="ReadWriteMany"`
 - **When:** Config is loaded
 - **Then:** 
   - `server.address = ":9090"`
   - `kubernetes.namespace = "team-a"`
   - `kubernetes.defaultStorageClass = "ceph-rbd"`
-  - `kubernetes.defaultAttachmentMode = "multiReadWrite"`
+  - `kubernetes.defaultAccessMode = "ReadWriteMany"`
 
 ### TC-U002: Default values applied when no config specified
 
@@ -58,7 +57,7 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
 - **Then:**
   - `server.address` defaults to `":8080"`
   - `kubernetes.namespace` defaults to `"default"`
-  - `kubernetes.defaultAttachmentMode` defaults to `"exclusive"`
+  - `kubernetes.defaultAccessMode` defaults to `"ReadWriteOnce"`
   - `kubernetes.defaultStorageClass` is empty (uses cluster default)
 
 ### TC-U003: Validate required configuration fields
@@ -100,7 +99,7 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
   - PVC `spec.resources.requests.storage = "100Gi"`
   - PVC `metadata.name = "test-volume"`
   - PVC uses SP default storageClass
-  - PVC `spec.accessModes = ["ReadWriteOnce"]` (default `attachment_mode: exclusive`)
+  - PVC `spec.accessModes = ["ReadWriteOnce"]` (default when `access_mode` omitted)
   - PVC `volumeMode = "Filesystem"` (Kubernetes default when unset)
 
 ### TC-U011: Apply storage_class from provider_hints
@@ -111,11 +110,11 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
 - **When:** PVC spec is built
 - **Then:** PVC `spec.storageClassName = "ceph-rbd"`
 
-### TC-U012: Apply attachment_mode on StorageSpec
+### TC-U012: Apply access_mode in provider_hints
 
 - **Priority:** High
 - **Type:** Unit
-- **Given:** DCM request with `attachment_mode: "multiReadWrite"`
+- **Given:** DCM request with `provider_hints.kubernetes.access_mode: "ReadWriteMany"`
 - **When:** PVC spec is built
 - **Then:** PVC `spec.accessModes = ["ReadWriteMany"]`
 
@@ -127,11 +126,11 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
 - **When:** PVC spec is built
 - **Then:** PVC `spec.volumeMode = "Block"`
 
-### TC-U014: Apply attachment_mode and provider_hints together
+### TC-U014: Apply provider_hints (storage_class, volume_mode, access_mode)
 
 - **Priority:** High
 - **Type:** Unit
-- **Given:** DCM request with `attachment_mode`, `provider_hints.kubernetes.storage_class`, and `provider_hints.kubernetes.volume_mode` set
+- **Given:** DCM request with `provider_hints.kubernetes.storage_class`, `volume_mode`, and `access_mode` set
 - **When:** PVC spec is built
 - **Then:** All three settings applied to PVC spec
 
@@ -207,13 +206,13 @@ out of scope for SP unit tests unless explicitly testing catalog payloads.
 - **When:** Request is validated
 - **Then:** Validation error returned for each case
 
-### TC-U025: Validate attachment_mode enum values
+### TC-U025: Validate access_mode enum values
 
 - **Priority:** Medium
 - **Type:** Unit
-- **Given:** DCM request with `attachment_mode: "InvalidMode"`
+- **Given:** DCM request with `provider_hints.kubernetes.access_mode: "InvalidMode"`
 - **When:** Request is validated
-- **Then:** Validation error: attachment_mode must be one of: `exclusive`, `multiReadWrite`, `multiReadOnly`
+- **Then:** Validation error: access_mode must be one of: `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`
 
 ### TC-U026: Validate volume_mode enum values
 

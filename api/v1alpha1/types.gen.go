@@ -89,21 +89,21 @@ func (e StorageStatus) Valid() bool {
 	}
 }
 
-// Defines values for VolumeAttachmentMode.
+// Defines values for VolumeAccessMode.
 const (
-	Exclusive      VolumeAttachmentMode = "exclusive"
-	MultiReadOnly  VolumeAttachmentMode = "multiReadOnly"
-	MultiReadWrite VolumeAttachmentMode = "multiReadWrite"
+	ReadOnlyMany  VolumeAccessMode = "ReadOnlyMany"
+	ReadWriteMany VolumeAccessMode = "ReadWriteMany"
+	ReadWriteOnce VolumeAccessMode = "ReadWriteOnce"
 )
 
-// Valid indicates whether the value is a known member of the VolumeAttachmentMode enum.
-func (e VolumeAttachmentMode) Valid() bool {
+// Valid indicates whether the value is a known member of the VolumeAccessMode enum.
+func (e VolumeAccessMode) Valid() bool {
 	switch e {
-	case Exclusive:
+	case ReadOnlyMany:
 		return true
-	case MultiReadOnly:
+	case ReadWriteMany:
 		return true
-	case MultiReadWrite:
+	case ReadWriteOnce:
 		return true
 	default:
 		return false
@@ -169,6 +169,10 @@ type Health struct {
 
 // KubernetesProviderHints Kubernetes-specific PVC settings
 type KubernetesProviderHints struct {
+	// AccessMode PVC access mode. Controls attachment scope and permissions at creation
+	// time (Kubernetes-specific; see service type definitions).
+	AccessMode *VolumeAccessMode `json:"access_mode,omitempty"`
+
 	// StorageClass StorageClass name (overrides SP default)
 	StorageClass *string `json:"storage_class,omitempty"`
 
@@ -185,11 +189,6 @@ type ProviderHints struct {
 
 // StorageSpec Storage specification for creating a PVC (implements the portable storage service type)
 type StorageSpec struct {
-	// AttachmentMode Portable attachment policy for the volume. Maps to platform-specific
-	// settings (e.g. Kubernetes PVC accessModes, OpenStack multiattach,
-	// Ceph RBD exclusive-lock). Default is exclusive (single consumer, read-write).
-	AttachmentMode *VolumeAttachmentMode `json:"attachment_mode,omitempty"`
-
 	// Capacity Requested storage capacity (e.g., "100Gi")
 	Capacity string `json:"capacity"`
 
@@ -228,10 +227,9 @@ type Volume struct {
 	UpdateTime *time.Time `json:"update_time,omitempty"`
 }
 
-// VolumeAttachmentMode Portable attachment policy for the volume. Maps to platform-specific
-// settings (e.g. Kubernetes PVC accessModes, OpenStack multiattach,
-// Ceph RBD exclusive-lock). Default is exclusive (single consumer, read-write).
-type VolumeAttachmentMode string
+// VolumeAccessMode PVC access mode. Controls attachment scope and permissions at creation
+// time (Kubernetes-specific; see service type definitions).
+type VolumeAccessMode string
 
 // VolumeList Paginated list of volume instances
 type VolumeList struct {

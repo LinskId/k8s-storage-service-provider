@@ -5,11 +5,22 @@
 - **Related Spec:** .ai/specs/k8s-storage-sp.spec.md
 - **Framework:** Ginkgo v2 + Gomega
 - **Created:** 2026-07-02
-- **Last Updated:** 2026-07-05
+- **Last Updated:** 2026-07-09
 
 Integration tests verify components working together with **real external services**.
-These tests require a real Kubernetes cluster (Kind), real NATS server, and real
-StorageClasses configured.
+These tests require a real Kubernetes cluster (Kind), and (for full suite) real
+NATS server and StorageClasses.
+
+**Implementation phases:**
+
+| Phase | Scope | Sections |
+|-------|--------|----------|
+| Health + registration (current) | §1–§2 | Server lifecycle, DCM registration |
+| Volume CRUD (follow-up) | §3–§6, §10 | PVC create/read/update/delete |
+| Monitoring (follow-up) | §7–§8 | NATS CloudEvents, informer |
+
+Until volume handlers and monitoring land, §3–§10 expect **500** on volume routes
+or are not runnable.
 
 **Real services required:**
 - ✅ Kind Kubernetes cluster (or similar test cluster)
@@ -50,7 +61,7 @@ StorageClasses configured.
    ```bash
    SP_K8S_NAMESPACE=dcm-test
    SP_K8S_DEFAULT_STORAGE_CLASS=""   # cluster default
-   SP_K8S_DEFAULT_ATTACHMENT_MODE=exclusive
+   SP_K8S_DEFAULT_ACCESS_MODE=ReadWriteOnce
    SP_NATS_URL=nats://localhost:4222
    DCM_REGISTRATION_URL=http://localhost:8080/api/v1alpha1
    SP_NAME=k8s-storage-sp
@@ -90,9 +101,9 @@ StorageClasses configured.
   - `GET /api/v1alpha1/health` returns 200
   - `POST /api/v1alpha1/volumes` does not return 404/405
   - `GET /api/v1alpha1/volumes` does not return 404/405
-  - `GET /api/v1alpha1/volumes/{id}` does not return 404/405
-  - `PATCH /api/v1alpha1/volumes/{id}` does not return 404/405
-  - `DELETE /api/v1alpha1/volumes/{id}` does not return 404/405
+  - `GET /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
+  - `PATCH /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
+  - `DELETE /api/v1alpha1/volumes/{volume_id}` does not return 404/405 (may return 500 until implemented)
 
 ### TC-I003: SP shuts down gracefully on SIGTERM
 
@@ -119,7 +130,11 @@ StorageClasses configured.
 
 ## 2 · SP Registration
 
-> **Suggested Ginkgo structure:** `Describe("SP Registration")`
+> **Suggested Ginkgo structure:** `Describe("SP Registration")`  
+> **Automated coverage:** `internal/registration/registration_integration_test.go` uses
+> `httptest` to exercise `Registrar.Start()` against a mock DCM registry (POST
+> `/providers`, retry on 5xx, no retry on 4xx, non-blocking `Start()`). Maps to
+> AC-REG-010–050. Full E2E with real control-plane remains manual (TC-I010–I011).
 
 ### TC-I010: SP registers with DCM on startup
 
@@ -130,27 +145,29 @@ StorageClasses configured.
   - SP configured with DCM registrar URL
 - **When:** SP starts
 - **Then:**
-  - POST request sent to DCM `/providers` endpoint
+  - POST request sent to DCM `POST /api/v1alpha1/providers`
   - Request body includes:
     - `name`: configured provider name
-    - `endpoint`: SP API URL
-    - `service_type`: "storage"
-    - `schema_version`: "v1alpha1"
+    - `endpoint`: `{SP_ENDPOINT}/api/v1alpha1/volumes`
+    - `service_type`: `"storage"`
+    - `schema_version`: `"v1alpha1"`
+    - `operations`: `["CREATE", "READ", "UPDATE", "DELETE"]`
 
 ### TC-I011: Health endpoint responds after registration
 
 - **Priority:** High
 - **Type:** Integration
 - **Given:** SP has registered with DCM
-- **When:** DCM polls `/health` endpoint
+- **When:** DCM polls `GET /api/v1alpha1/volumes/health`
 - **Then:**
   - Response: 200 OK
-  - Body: `{"status": "healthy", "version": "...", "uptime": ...}`
+  - Body includes: `status`, `type`, `path`, `version`, `uptime` (e.g. `"status": "healthy"`)
 
 ---
 
 ## 3 · PVC Creation (Real Kubernetes)
 
+> **Phase:** Volume CRUD follow-up (not in health+registration PR)  
 > **Suggested Ginkgo structure:** `Describe("PVC Creation")`
 
 ### TC-I020: Create PVC with minimal spec
@@ -186,12 +203,12 @@ StorageClasses configured.
   - PVC created with `spec.storageClassName: "ceph-rbd"`
   - PVC binds to PV (if provisioner is available)
 
-### TC-I022: Create PVC with attachment_mode
+### TC-I022: Create PVC with access_mode hint
 
 - **Priority:** High
 - **Type:** Integration
 - **Given:** StorageClass supports ReadWriteMany
-- **When:** POST with `attachment_mode: "multiReadWrite"`
+- **When:** POST with `provider_hints.kubernetes.access_mode: "ReadWriteMany"`
 - **Then:** PVC created with `spec.accessModes: ["ReadWriteMany"]`
 
 ### TC-I023: Create PVC with volume_mode hint
@@ -202,11 +219,11 @@ StorageClasses configured.
 - **When:** POST with `provider_hints.kubernetes.volume_mode: "Block"`
 - **Then:** PVC created with `spec.volumeMode: "Block"`
 
-### TC-I024: Create PVC with attachment_mode and provider_hints
+### TC-I024: Create PVC with all provider_hints
 
 - **Priority:** High
 - **Type:** Integration
-- **Given:** `attachment_mode`, `provider_hints.kubernetes.storage_class`, and `provider_hints.kubernetes.volume_mode` specified
+- **Given:** `provider_hints.kubernetes.storage_class`, `volume_mode`, and `access_mode` specified
 - **When:** POST with all hints set
 - **Then:** PVC created with all three settings applied correctly
 
@@ -225,7 +242,7 @@ StorageClasses configured.
 - **Priority:** Medium
 - **Type:** Integration
 - **Given:** StorageClass `"non-existent"` does not exist
-- **When:** POST with `storageClass: "non-existent"`
+- **When:** POST with `provider_hints.kubernetes.storage_class: "non-existent"`
 - **Then:**
   - Either: 422 Unprocessable Entity (if validated by SP)
   - Or: PVC created but stuck in Pending with error event
@@ -245,22 +262,24 @@ StorageClasses configured.
 
 ## 4 · PVC Reading (Real Kubernetes)
 
+> **Phase:** Volume CRUD follow-up  
 > **Suggested Ginkgo structure:** `Describe("PVC Reading")`
 
 ### TC-I030: GET single volume returns PVC details
 
 - **Priority:** High
 - **Type:** Integration
-- **Given:** PVC exists with `dcm-instance-id = "abc-123"`
-- **When:** GET `/api/v1alpha1/volumes/abc-123`
+- **Given:** PVC exists with `dcm-instance-id = "550e8400-e29b-41d4-a716-446655440000"`
+- **When:** GET `/api/v1alpha1/volumes/550e8400-e29b-41d4-a716-446655440000`
 - **Then:**
   - Response: 200 OK
   - Response body includes:
-    - `requestId: "abc-123"`
-    - `name`: PVC name
-    - `capacity`: PVC size
-    - `status`: Current status (PROVISIONING or RUNNING)
-    - `metadata.storageClass`: StorageClass name
+    - `id`: `"550e8400-e29b-41d4-a716-446655440000"`
+    - `path`: `"volumes/550e8400-e29b-41d4-a716-446655440000"`
+    - `spec.capacity`: PVC size
+    - `spec.metadata.name`: PVC name
+    - `spec.metadata.storage_class`: StorageClass name
+    - `status`: current status (`PROVISIONING` or `RUNNING`)
 
 ### TC-I031: GET volume returns PROVISIONING while pending
 
@@ -278,14 +297,14 @@ StorageClasses configured.
 - **When:** GET volume
 - **Then:**
   - Response status field is `"RUNNING"`
-  - Response includes `volumeName` (PV name)
+  - `spec.metadata.volume_name` includes bound PV name
 
 ### TC-I033: GET volume returns 404 for non-existent
 
 - **Priority:** High
 - **Type:** Integration
-- **Given:** No PVC with `dcm-instance-id = "invalid"`
-- **When:** GET `/api/v1alpha1/volumes/invalid`
+- **Given:** No PVC with `dcm-instance-id` matching the UUID
+- **When:** GET `/api/v1alpha1/volumes/550e8400-e29b-41d4-a716-446655440099`
 - **Then:** Response: 404 Not Found
 
 ### TC-I034: LIST volumes returns all managed PVCs
@@ -296,7 +315,7 @@ StorageClasses configured.
 - **When:** GET `/api/v1alpha1/volumes`
 - **Then:**
   - Response: 200 OK
-  - Response contains 3 volumes in results array
+  - Response contains 3 volumes in `volumes` array
 
 ### TC-I035: LIST volumes filters by DCM labels only
 
@@ -323,6 +342,7 @@ StorageClasses configured.
 
 ## 5 · PVC Expansion (Real Kubernetes)
 
+> **Phase:** Volume CRUD follow-up  
 > **Suggested Ginkgo structure:** `Describe("PVC Expansion")`
 
 ### TC-I040: Expand volume when StorageClass allows
@@ -332,7 +352,7 @@ StorageClasses configured.
 - **Given:**
   - PVC exists with capacity `10Gi`
   - PVC uses StorageClass `ceph-rbd` (allowVolumeExpansion: true)
-- **When:** PATCH `/api/v1alpha1/volumes/{id}` with `capacity: "20Gi"`
+- **When:** PATCH `/api/v1alpha1/volumes/{volume_id}` with `{"capacity": "20Gi"}`
 - **Then:**
   - Response: 200 OK
   - PVC `spec.resources.requests.storage` updated to `20Gi`
@@ -392,6 +412,7 @@ StorageClasses configured.
 
 ## 6 · PVC Deletion (Real Kubernetes)
 
+> **Phase:** Volume CRUD follow-up  
 > **Suggested Ginkgo structure:** `Describe("PVC Deletion")`
 
 ### TC-I050: Delete unattached PVC
@@ -399,7 +420,7 @@ StorageClasses configured.
 - **Priority:** High
 - **Type:** Integration
 - **Given:** PVC exists and is not attached to any Pod
-- **When:** DELETE `/api/v1alpha1/volumes/{id}`
+- **When:** DELETE `/api/v1alpha1/volumes/{volume_id}`
 - **Then:**
   - Response: 204 No Content
   - PVC is removed from Kubernetes cluster
@@ -428,6 +449,7 @@ StorageClasses configured.
 
 ## 7 · Status Reporting (Real NATS)
 
+> **Phase:** Monitoring follow-up  
 > **Suggested Ginkgo structure:** `Describe("Status Reporting")`
 
 ### TC-I060: CloudEvent published on PVC creation
@@ -454,7 +476,7 @@ StorageClasses configured.
 - **When:** PVC binds to PV
 - **Then:**
   - CloudEvent published with `status: "RUNNING"`
-  - Event data includes `volumeName`
+  - Event data includes bound PV name in status message (from `spec.metadata.volume_name`)
 
 ### TC-I062: CloudEvent published on PVC deletion
 
@@ -497,6 +519,7 @@ StorageClasses configured.
 
 ## 8 · Informer Behavior
 
+> **Phase:** Monitoring follow-up  
 > **Suggested Ginkgo structure:** `Describe("Informer Behavior")`
 
 ### TC-I070: Informer starts and watches PVCs
@@ -545,6 +568,7 @@ StorageClasses configured.
 
 ## 9 · Multiple StorageClass Scenarios
 
+> **Phase:** Volume CRUD follow-up  
 > **Suggested Ginkgo structure:** `Describe("Multiple StorageClass Scenarios")`
 
 ### TC-I080: Use different StorageClasses
@@ -552,7 +576,7 @@ StorageClasses configured.
 - **Priority:** High
 - **Type:** Integration
 - **Given:** Multiple StorageClasses exist (ceph-rbd, nfs)
-- **When:** Create PVCs with different storageClass hints
+- **When:** Create PVCs with different `provider_hints.kubernetes.storage_class` values
 - **Then:** Each PVC uses the specified StorageClass
 
 ### TC-I081: Expansion behavior differs by backend
@@ -572,13 +596,14 @@ StorageClasses configured.
 - **Priority:** Medium
 - **Type:** Integration
 - **Given:** Cluster has default StorageClass configured
-- **When:** Create PVC without storageClass hint
+- **When:** Create PVC without `provider_hints.kubernetes.storage_class`
 - **Then:** PVC uses cluster default StorageClass
 
 ---
 
 ## 10 · Error Scenarios
 
+> **Phase:** Mixed (§10.091 health now; §10.090 NATS when monitoring lands)  
 > **Suggested Ginkgo structure:** `Describe("Error Scenarios")`
 
 ### TC-I090: Handle NATS connection failure gracefully
@@ -622,17 +647,18 @@ StorageClasses configured.
 ```bash
 cd k8s-storage-service-provider
 
-# Start test infrastructure
-make integration-test-up  # Starts Kind + NATS
+# Health + registration smoke (manual today):
+# - kind cluster + control-plane on :8081
+# - export SP_* / DCM_REGISTRATION_URL, make run
+# - curl http://localhost:8080/api/v1alpha1/volumes/health
 
-# Run integration tests
-make test-integration
-
-# Stop infrastructure
-make integration-test-down
+# Full integration suite (planned — targets not in Makefile yet):
+# make integration-test-up
+# make test-integration
+# make integration-test-down
 ```
 
-Or with Ginkgo directly:
+Or with Ginkgo directly (when `test/integration` exists):
 
 ```bash
 ginkgo -r test/integration --tags=integration

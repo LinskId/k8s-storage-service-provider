@@ -4,6 +4,7 @@ info:
   description: |
     REST API for managing persistent storage volumes (PersistentVolumeClaims)
     on Kubernetes clusters on behalf of DCM.
+    This API follows AEP standards for consistency across DCM services.
   version: 1.0.0
   contact:
     name: DCM Project
@@ -310,17 +311,16 @@ components:
         - DELETED
       description: Current status of the storage instance (CloudEvents payload uses this enum)
 
-    VolumeAttachmentMode:
+    VolumeAccessMode:
       type: string
       enum:
-        - exclusive
-        - multiReadWrite
-        - multiReadOnly
+        - ReadWriteOnce
+        - ReadOnlyMany
+        - ReadWriteMany
       description: |
-        Portable attachment policy for the volume. Maps to platform-specific
-        settings (e.g. Kubernetes PVC accessModes, OpenStack multiattach,
-        Ceph RBD exclusive-lock). Default is exclusive (single consumer, read-write).
-      example: exclusive
+        PVC access mode. Controls attachment scope and permissions at creation
+        time (Kubernetes-specific; see service type definitions).
+      example: ReadWriteOnce
 
     VolumeMode:
       type: string
@@ -369,6 +369,8 @@ components:
           description: StorageClass name (overrides SP default)
         volume_mode:
           $ref: '#/components/schemas/VolumeMode'
+        access_mode:
+          $ref: '#/components/schemas/VolumeAccessMode'
 
     ProviderHints:
       type: object
@@ -397,8 +399,6 @@ components:
           description: Requested storage capacity (e.g., "100Gi")
           pattern: '^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
           example: "100Gi"
-        attachment_mode:
-          $ref: '#/components/schemas/VolumeAttachmentMode'
         provider_hints:
           $ref: '#/components/schemas/ProviderHints'
 

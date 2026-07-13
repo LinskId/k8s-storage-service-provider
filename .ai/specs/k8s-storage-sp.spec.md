@@ -24,7 +24,7 @@ driver.
 - StorageClass selection via SP defaults, catalog/policy, or
   `provider_hints.kubernetes.storage_class` — not SP discovery of cluster
   StorageClasses
-- Portable `attachment_mode` mapped to Kubernetes `accessModes`
+- `provider_hints.kubernetes.access_mode` mapped to Kubernetes PVC `accessModes`
 - `ReadWriteOncePod` (RWOP) is out of scope for v1
 
 **Reference documents:**
@@ -373,8 +373,7 @@ Out of scope: authentication/authorization (401/403), workload attachment
 | REQ-API-220 | DELETE MUST return 404 when the volume does not exist | MUST | |
 | REQ-API-230 | All error responses MUST use `Content-Type: application/problem+json` and RFC 7807 `Error` schema with at minimum `type` and `title` fields | MUST | |
 | REQ-API-231 | Error types MUST map to appropriate HTTP status codes per the error mapping table | MUST | |
-| REQ-API-240 | `provider_hints` MUST be accepted on input; only `provider_hints.kubernetes.storage_class` and `provider_hints.kubernetes.volume_mode` are acted on in v1 | MUST | DD-020 |
-| REQ-API-250 | 401 and 403 responses are defined in the OpenAPI spec for forward compatibility but MUST NOT be returned in v1 | MUST | Auth out of scope |
+| REQ-API-240 | `provider_hints` MUST be accepted on input; `provider_hints.kubernetes.storage_class`, `volume_mode`, and `access_mode` are acted on in v1 | MUST | DD-020 |
 
 **Error type mapping (REQ-API-231):**
 
@@ -386,10 +385,6 @@ Out of scope: authentication/authorization (401/403), workload attachment
 | ResourceQuota exceeded on PATCH | 409 | ALREADY_EXISTS |
 | StorageClass missing / expansion not allowed | 422 | FAILED_PRECONDITION |
 | Unexpected error | 500 | INTERNAL |
-
-> **Note:** 401 and 403 responses are defined in the OpenAPI spec for forward
-> compatibility but MUST NOT be returned in v1. Authentication and authorization
-> are out of scope for v1.
 
 #### Acceptance Criteria
 
@@ -565,7 +560,7 @@ Depends on Topic 1 (HTTP Server) and Topic 4 (Kubernetes Integration & Store).
 
 Define a volume storage interface that abstracts volume persistence operations.
 Implement it backed by Kubernetes PVCs. Manage PVC lifecycle in a single
-configured namespace. Apply DCM labels, resolve StorageClass and attachment
+configured namespace. Apply DCM labels, resolve StorageClass and access
 mode defaults, and validate preconditions for create and patch.
 
 Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
@@ -600,8 +595,8 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 | REQ-K8S-060 | List/get operations MUST scope to DCM-managed PVCs (`managed-by=dcm`, `dcm-service-type=storage`) | MUST | |
 | REQ-K8S-070 | `capacity` MUST map to `spec.resources.requests.storage` on the PVC | MUST | |
 | REQ-K8S-080 | StorageClass MUST resolve from `provider_hints.kubernetes.storage_class`, else `SP_K8S_DEFAULT_STORAGE_CLASS`, else cluster default | MUST | DD-020 |
-| REQ-K8S-090 | `attachment_mode` MUST map to Kubernetes `accessModes`: `exclusive`→RWO, `multiReadWrite`→RWX, `multiReadOnly`→ROX | MUST | |
-| REQ-K8S-100 | Default `attachment_mode` when omitted MUST come from `SP_K8S_DEFAULT_ATTACHMENT_MODE` (default `exclusive`) | MUST | |
+| REQ-K8S-090 | `provider_hints.kubernetes.access_mode` MUST map directly to PVC `spec.accessModes` (`ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`) | MUST | |
+| REQ-K8S-100 | Default access mode when omitted MUST come from `SP_K8S_DEFAULT_ACCESS_MODE` (default `ReadWriteOnce`) | MUST | |
 | REQ-K8S-110 | `provider_hints.kubernetes.volume_mode` MUST map to PVC `volumeMode` (`Filesystem` or `Block`) | MUST | |
 | REQ-K8S-120 | POST MUST verify the StorageClass exists before creating the PVC | MUST | |
 | REQ-K8S-130 | PATCH MUST read the bound StorageClass and verify `allowVolumeExpansion: true` | MUST | |
@@ -614,13 +609,9 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 | REQ-K8S-200 | The SP MUST support authentication via kubeconfig file when `SP_K8S_KUBECONFIG` is set | MUST | |
 | REQ-K8S-210 | The SP MUST support in-cluster service account authentication when `SP_K8S_KUBECONFIG` is unset | MUST | |
 
-**Attachment mode mapping (REQ-K8S-090):**
-
-| Portable `attachment_mode` | Kubernetes `accessModes` |
-|----------------------------|--------------------------|
-| `exclusive` (default) | `ReadWriteOnce` |
-| `multiReadWrite` | `ReadWriteMany` |
-| `multiReadOnly` | `ReadOnlyMany` |
+**Access mode (REQ-K8S-090):** Values under `provider_hints.kubernetes.access_mode`
+are Kubernetes PVC access modes (`ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`).
+No portable-to-K8s translation layer is required.
 
 #### Configuration Introduced
 
@@ -629,7 +620,7 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 | kubernetes.namespace | SP_K8S_NAMESPACE | default | Namespace for all PVCs |
 | kubernetes.kubeconfig | SP_K8S_KUBECONFIG | (in-cluster) | Path to kubeconfig |
 | kubernetes.defaultStorageClass | SP_K8S_DEFAULT_STORAGE_CLASS | (cluster default) | Fallback StorageClass |
-| kubernetes.defaultAttachmentMode | SP_K8S_DEFAULT_ATTACHMENT_MODE | exclusive | Fallback attachment mode |
+| kubernetes.defaultAccessMode | SP_K8S_DEFAULT_ACCESS_MODE | ReadWriteOnce | Fallback PVC access mode |
 
 #### Acceptance Criteria — Store Interface
 
@@ -742,17 +733,17 @@ Out of scope: creating StorageClasses, CSI drivers, Pods, or workload mounts.
 - **When** POST is processed
 - **Then** the handler MUST return 422 without creating a PVC
 
-##### AC-K8S-030: Attachment mode mapping
+##### AC-K8S-030: Access mode mapping
 
 - **Validates:** REQ-K8S-090
-- **Given** a create request with `attachment_mode: multiReadWrite`
+- **Given** a create request with `provider_hints.kubernetes.access_mode: ReadWriteMany`
 - **When** the PVC is created
 - **Then** the PVC `accessModes` MUST include `ReadWriteMany`
 
-##### AC-K8S-040: Default attachment mode
+##### AC-K8S-040: Default access mode
 
 - **Validates:** REQ-K8S-100
-- **Given** a create request with no `attachment_mode` and `SP_K8S_DEFAULT_ATTACHMENT_MODE=exclusive`
+- **Given** a create request with no `provider_hints.kubernetes.access_mode` and `SP_K8S_DEFAULT_ACCESS_MODE=ReadWriteOnce`
 - **When** the PVC is created
 - **Then** the PVC `accessModes` MUST include `ReadWriteOnce`
 
@@ -1344,7 +1335,7 @@ errors, NATS disconnects, and HTTP panics MUST be logged at appropriate levels.
 |----|-------------|----------|-------|
 | REQ-XC-CFG-010 | All configuration MUST be loadable from environment variables | MUST | REQ-HTTP-050 |
 | REQ-XC-CFG-020 | The SP MUST fail fast on startup when required configuration values are absent or empty, returning an error before starting any subsystem | MUST | |
-| REQ-XC-CFG-030 | `SP_K8S_DEFAULT_ATTACHMENT_MODE` when set MUST be one of `exclusive`, `multiReadWrite`, or `multiReadOnly`. The SP MUST fail fast on startup if invalid | MUST | |
+| REQ-XC-CFG-030 | `SP_K8S_DEFAULT_ACCESS_MODE` when set MUST be one of `ReadWriteOnce`, `ReadOnlyMany`, or `ReadWriteMany`. The SP MUST fail fast on startup if invalid | MUST | |
 
 **Required configuration (v1):** `SP_NAME`, `SP_ENDPOINT`, `DCM_REGISTRATION_URL`.
 `SP_NATS_URL` is required when the monitoring subsystem is enabled (Topic 5).
@@ -1366,10 +1357,10 @@ errors, NATS disconnects, and HTTP panics MUST be logged at appropriate levels.
 - **Then** the SP MUST return an error identifying the missing field
 - **And** MUST exit before starting the HTTP server or any subsystem
 
-##### AC-XC-CFG-030: Fail-fast on invalid attachment mode
+##### AC-XC-CFG-030: Fail-fast on invalid access mode
 
 - **Validates:** REQ-XC-CFG-030
-- **Given** `SP_K8S_DEFAULT_ATTACHMENT_MODE` is set to an invalid value
+- **Given** `SP_K8S_DEFAULT_ACCESS_MODE` is set to an invalid value
 - **When** the SP starts
 - **Then** the SP MUST return an error identifying the invalid configuration
 - **And** MUST exit before starting the HTTP server or any subsystem
@@ -1389,7 +1380,7 @@ errors, NATS disconnects, and HTTP panics MUST be logged at appropriate levels.
 | kubernetes.namespace | SP_K8S_NAMESPACE | default | No | 4 |
 | kubernetes.kubeconfig | SP_K8S_KUBECONFIG | (in-cluster) | No | 4 |
 | kubernetes.defaultStorageClass | SP_K8S_DEFAULT_STORAGE_CLASS | (cluster default) | No | 4 |
-| kubernetes.defaultAttachmentMode | SP_K8S_DEFAULT_ATTACHMENT_MODE | exclusive | No | 4 |
+| kubernetes.defaultAccessMode | SP_K8S_DEFAULT_ACCESS_MODE | ReadWriteOnce | No | 4 |
 | nats.url | SP_NATS_URL | - | Yes | 5 |
 | monitoring.debounceMs | SP_MONITOR_DEBOUNCE_MS | 500 | No | 5 |
 | monitoring.resyncPeriod | SP_MONITOR_RESYNC_PERIOD | 10m | No | 5 |
@@ -1457,13 +1448,16 @@ registrations can target the same cluster with different namespaces.
 
 **Related requirements:** REQ-K8S-020
 
-### DD-050: Portable attachment_mode vs Kubernetes accessModes
+### DD-050: access_mode in provider_hints.kubernetes
 
-**Decision:** API uses portable `attachment_mode` on `StorageSpec`. The K8s
-store maps to PVC `accessModes`.
+**Decision:** PVC access mode is supplied under
+`provider_hints.kubernetes.access_mode` using Kubernetes access mode values
+(`ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`). This matches the catalog
+`storage` service type and [service-type-definitions](../service-type-definitions/service-type-definitions.md#storage).
 
-**Rationale:** Matches catalog portable `storage` service type; keeps the REST
-contract platform-neutral.
+**Rationale:** Access mode is platform-specific (Kubernetes PVC creation-time
+setting). Catalog admins configure it via provider hints based on backend
+capabilities (e.g. Ceph RBD vs CephFS).
 
 **Related requirements:** REQ-K8S-090, REQ-K8S-100
 
