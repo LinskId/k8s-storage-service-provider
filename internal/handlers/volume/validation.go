@@ -36,7 +36,7 @@ func validateCreateSpec(spec v1alpha1.StorageSpec) error {
 	if spec.Metadata.Name == "" {
 		return fmt.Errorf("metadata.name is required")
 	}
-	return validateVolumeID(spec.Metadata.Name)
+	return nil
 }
 
 func validateUserLabels(labels *map[string]string) error {
