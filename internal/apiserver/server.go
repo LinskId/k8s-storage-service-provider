@@ -2,9 +2,12 @@
 package apiserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -307,6 +310,15 @@ func New(cfg *config.Config, logger *slog.Logger, handler oapigen.ServerInterfac
 	r.Use(requestLoggingMiddleware(logger))
 	r.Use(requestTimeoutMiddleware(cfg.Server.RequestTimeout))
 
+	postPath, pathErr := v1alpha1.PostPath()
+	if pathErr != nil {
+		logger.Warn("failed to resolve POST path from OpenAPI spec; bare-spec wrap and trailing-slash guards disabled", "error", pathErr)
+	} else {
+		// environment-agent createExternal POSTs the inner StorageSpec JSON
+		// (not a Volume envelope). Normalize before OpenAPI validation.
+		r.Use(wrapBareCreateSpecMiddleware(postPath, logger))
+	}
+
 	// Load OpenAPI spec for request validation middleware.
 	spec, err := v1alpha1.GetSwagger()
 	if err != nil {
@@ -327,10 +339,7 @@ func New(cfg *config.Config, logger *slog.Logger, handler oapigen.ServerInterfac
 	emptyIDHandler := func(w http.ResponseWriter, r *http.Request) {
 		httperror.WriteResponse(w, logger, http.StatusBadRequest, v1alpha1.INVALIDARGUMENT, "Bad Request", "volume_id is required and cannot be empty", requestInstance(r))
 	}
-	postPath, pathErr := v1alpha1.PostPath()
-	if pathErr != nil {
-		logger.Warn("failed to resolve POST path from OpenAPI spec, trailing-slash guards disabled", "error", pathErr)
-	} else {
+	if pathErr == nil {
 		r.Get(postPath+"/", emptyIDHandler)
 		r.Delete(postPath+"/", emptyIDHandler)
 	}
@@ -351,6 +360,62 @@ func New(cfg *config.Config, logger *slog.Logger, handler oapigen.ServerInterfac
 		},
 	}
 	return s
+}
+
+// wrapBareCreateSpecMiddleware rewrites POST create bodies that are a bare
+// StorageSpec object into the OpenAPI Volume envelope {"spec": ...}.
+// environment-agent createExternal marshals req.Spec directly; direct API
+// clients that already send a Volume body are left unchanged.
+func wrapBareCreateSpecMiddleware(createPath string, logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != createPath {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			body, err := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			if err != nil {
+				httperror.WriteResponse(w, logger, http.StatusBadRequest, v1alpha1.INVALIDARGUMENT, "Bad Request", "failed to read request body", requestInstance(r))
+				return
+			}
+
+			if wrapped, ok := wrapBareStorageCreateBody(body); ok {
+				body = wrapped
+			}
+
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.ContentLength = int64(len(body))
+			r.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(body)), nil
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// wrapBareStorageCreateBody returns a Volume-shaped JSON body when body is a
+// JSON object without a top-level "spec" key. Otherwise it returns ok=false.
+func wrapBareStorageCreateBody(body []byte) ([]byte, bool) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, false
+	}
+
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
+		return nil, false
+	}
+	if _, hasSpec := probe["spec"]; hasSpec {
+		return nil, false
+	}
+
+	wrapped, err := json.Marshal(map[string]json.RawMessage{"spec": json.RawMessage(trimmed)})
+	if err != nil {
+		return nil, false
+	}
+	return wrapped, true
 }
 
 // openAPIValidationMiddleware validates incoming requests against the OpenAPI spec.

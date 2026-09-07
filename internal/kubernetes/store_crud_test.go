@@ -264,6 +264,18 @@ var _ = Describe("K8s Volume Store CRUD", func() {
 			Expect(errors.As(err, &invalid)).To(BeTrue())
 		})
 
+		It("returns invalid argument for zero capacity", func() {
+			s, _ := newTestStore(defaultConfig())
+			spec := minimalVolumeSpec("app-data")
+			spec.Capacity = "0Gi"
+
+			_, err := s.Create(context.Background(), spec, "app-data")
+			Expect(err).To(HaveOccurred())
+			var invalid *store.InvalidArgumentError
+			Expect(errors.As(err, &invalid)).To(BeTrue())
+			Expect(invalid.Message).To(ContainSubstring("greater than zero"))
+		})
+
 		It("returns invalid argument for unsupported volume mode", func() {
 			s, _ := newTestStore(defaultConfig())
 			badMode := v1alpha1.VolumeMode("Raw")

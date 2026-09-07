@@ -1041,7 +1041,7 @@ integration, provider capability updates post-registration.
 
 | Config Key | Env Var | Default | Description |
 |------------|---------|---------|-------------|
-| dcm.registrationUrl | DCM_REGISTRATION_URL | (required) | DCM SP registration base URL |
+| dcm.registrationUrl | DCM_REGISTRATION_URL | (required) | Environment-agent API base URL (e.g. `http://environment-agent:8080/api/v1alpha1`); registrar posts to `/providers` |
 | provider.name | SP_NAME | (required) | Provider name |
 | provider.displayName | SP_DISPLAY_NAME | (optional) | Human-readable name |
 | provider.endpoint | SP_ENDPOINT | (required) | Externally reachable SP base URL |
@@ -1397,6 +1397,24 @@ setting). Catalog admins configure it via provider hints based on backend
 capabilities (e.g. Ceph RBD vs CephFS).
 
 **Related requirements:** REQ-K8S-090, REQ-K8S-100
+
+### DD-060: Catalog capacity validation_schema is recommended for this adapter
+
+**Decision:** For this Kubernetes storage adapter, catalog items that expose
+editable `capacity` SHOULD include a `validation_schema` with the Kubernetes
+quantity pattern used by OpenAPI `capacity` (as an example, not a portable
+catalog MUST). When that schema is present, control-plane Catalog enforces it on
+`POST /catalog-item-instances` so invalid capacity is rejected with HTTP 400
+before placement. The SP still validates with `resource.ParseQuantity` on
+direct `POST /volumes`; catalog schema closes the async-fail gap on the
+catalog path.
+
+**Rationale:** Without catalog `validation_schema`, create returns 201 and the
+SP rejects asynchronously (FLPATH-4906). Schema is optional catalog-level
+control for this adapter; not a control-plane-wide K8s assumption and not an
+SP redesign.
+
+**Related requirements:** REQ-API-060, catalog-item-schema Validation section
 
 ### DD-060: RWOP excluded from v1
 

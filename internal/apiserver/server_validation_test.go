@@ -186,9 +186,6 @@ var _ = Describe("Volume API - Request Validation", func() {
 		Entry("metadata.name with invalid characters",
 			`{"spec":{"service_type":"storage","metadata":{"name":"Invalid_Name!"},"capacity":"10Gi"}}`,
 			"metadata.name with invalid characters"),
-		Entry("raw StorageSpec body without spec wrapper",
-			`{"service_type":"storage","metadata":{"name":"test-vol"},"capacity":"10Gi"}`,
-			"raw body missing required spec wrapper"),
 	)
 
 	DescribeTable("rejects invalid client IDs via OpenAPI middleware",
@@ -264,5 +261,34 @@ var _ = Describe("Volume API - Request Validation", func() {
 		meta, ok := spec["metadata"].(map[string]any)
 		Expect(ok).To(BeTrue(), "metadata should be an object")
 		Expect(meta["name"]).To(Equal("test-vol"))
+	})
+
+	// Mirrors environment-agent createExternal: POST json.Marshal(req.Spec)
+	// with no Volume envelope.
+	It("accepts agent-forwarded bare StorageSpec create body", func() {
+		baseURL := startValidationServer(&stubVolumeRepository{})
+		bareSpec := `{"service_type":"storage","metadata":{"name":"agent-vol"},"capacity":"10Gi"}`
+
+		resp, err := http.Post(
+			baseURL+volumesAPIPath,
+			"application/json",
+			strings.NewReader(bareSpec),
+		)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = resp.Body.Close() }()
+
+		Expect(resp.StatusCode).To(Equal(http.StatusCreated))
+
+		respBody, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+
+		var result map[string]any
+		Expect(json.Unmarshal(respBody, &result)).To(Succeed())
+		spec, ok := result["spec"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(spec["capacity"]).To(Equal("10Gi"))
+		meta, ok := spec["metadata"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(meta["name"]).To(Equal("agent-vol"))
 	})
 })

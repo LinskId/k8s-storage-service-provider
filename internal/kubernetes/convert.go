@@ -108,6 +108,9 @@ func buildPVC(spec v1alpha1.StorageSpec, cfg K8sConfig, labels map[string]string
 	if err != nil {
 		return nil, &store.InvalidArgumentError{Message: fmt.Sprintf("invalid capacity %q: %v", spec.Capacity, err)}
 	}
+	if qty.Sign() <= 0 {
+		return nil, &store.InvalidArgumentError{Message: fmt.Sprintf("capacity must be greater than zero, got %q", spec.Capacity)}
+	}
 
 	accessMode, err := resolveAccessMode(spec, cfg.DefaultAccessMode)
 	if err != nil {
